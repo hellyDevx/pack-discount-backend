@@ -1,0 +1,23 @@
+{
+  "name": "helly-pack-discount-1",
+  "version": "1.0.0",
+  "license": "UNLICENSED",
+  "scripts": {
+    "shopify": "shopify",
+    "typegen": "npm --workspace=pack-discount run typegen",
+    "build": "shopify app build",
+    "dev": "shopify app dev",
+    "info": "shopify app info",
+    "generate": "shopify app generate",
+    "deploy": "shopify app deploy"
+  },
+  "dependencies": {},
+  "trustedDependencies": [
+    "@shopify/plugin-cloudflare"
+  ],
+  "author": "hellypatel",
+  "private": true,
+  "workspaces": [
+    "extensions/*"
+  ]
+}
