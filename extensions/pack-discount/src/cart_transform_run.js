@@ -13,7 +13,14 @@ const NO_CHANGES = { operations: [] };
  * @returns {CartTransformRunResult}
  */
 export function cartTransformRun(input) {
-  if (!input?.cart?.lines) return NO_CHANGES;
+  console.log('[CartTransform] START');
+
+  if (!input?.cart?.lines) {
+    console.log('[CartTransform] No cart lines');
+    return NO_CHANGES;
+  }
+
+  console.log('[CartTransform] Total lines:', input.cart.lines.length);
 
   const UNIT_DISCOUNT_PERCENT = 10;
   const ops = [];
@@ -29,28 +36,64 @@ export function cartTransformRun(input) {
       /** @type {any} */
       const l = line;
 
+      console.log('-----------------------------');
+      console.log('[Line] ID:', l.id);
+      console.log('[Line] Quantity:', l.quantity);
+
       const productTitle =
         l.merchandise?.__typename === 'ProductVariant'
           ? l.merchandise.product?.title
           : null;
 
+      console.log('[Line] Product title:', productTitle);
+
       const packSize = parsePackSizeFromTitle(productTitle);
-      if (!packSize) continue;
+      console.log('[Line] Parsed pack size:', packSize);
 
-      // Validate quantity matches pack size (optional but recommended)
-      if (l.quantity !== packSize) continue;
+      if (!packSize) {
+        console.log('[SKIP] Not a pack product');
+        continue;
+      }
 
-      const compareAt =
-        l.cost?.compareAtAmountPerQuantity?.amount ??
-        l.cost?.amountPerQuantity?.amount;
+      if (l.quantity !== packSize) {
+        console.log(
+          '[SKIP] Quantity does not match pack size',
+          'Qty:',
+          l.quantity,
+          'Pack:',
+          packSize
+        );
+        continue;
+      }
 
-      if (!compareAt) continue;
+      const compareAt = l.cost?.compareAtAmountPerQuantity?.amount;
+      const current = l.cost?.amountPerQuantity?.amount;
 
-      const originalPrice = Number(compareAt);
-      if (Number.isNaN(originalPrice)) continue;
+      console.log('[Line] Compare-at price:', compareAt);
+      console.log('[Line] Current price:', current);
+
+      const basePrice = compareAt ?? current;
+      if (!basePrice) {
+        console.log('[SKIP] No base price available');
+        continue;
+      }
+
+      const originalPrice = Number(basePrice);
+      if (Number.isNaN(originalPrice)) {
+        console.log('[SKIP] Price is NaN:', basePrice);
+        continue;
+      }
 
       const discountedUnitPrice =
         originalPrice * (1 - UNIT_DISCOUNT_PERCENT / 100);
+
+      console.log(
+        '[APPLY]',
+        'Original:',
+        originalPrice,
+        'Discounted:',
+        discountedUnitPrice.toFixed(2)
+      );
 
       ops.push({
         lineUpdate: {
@@ -64,10 +107,19 @@ export function cartTransformRun(input) {
           },
         },
       });
-    } catch {
+    } catch (e) {
+      console.log('[ERROR] Line failed:', e);
       continue;
     }
   }
 
-  return ops.length ? { operations: ops } : NO_CHANGES;
+  console.log('[CartTransform] Operations count:', ops.length);
+
+  if (!ops.length) {
+    console.log('[CartTransform] NO CHANGES');
+    return NO_CHANGES;
+  }
+
+  console.log('[CartTransform] APPLYING CHANGES');
+  return { operations: ops };
 }
