@@ -5,92 +5,69 @@
  * @typedef {import("../generated/api").CartTransformRunResult} CartTransformRunResult
  */
 
-/**
- * @type {CartTransformRunResult}
- */
-const NO_CHANGES = {
-  operations: [],
-};
+/** @type {CartTransformRunResult} */
+const NO_CHANGES = { operations: [] };
 
 /**
  * @param {CartTransformRunInput} input
  * @returns {CartTransformRunResult}
  */
 export function cartTransformRun(input) {
-  if (!input || !input.cart || !Array.isArray(input.cart.lines)) return NO_CHANGES;
+  if (!input?.cart?.lines) return NO_CHANGES;
 
-  // Discount mapping for packs (packSize -> percent)
-  /** @type {Record<number, number>} */
-  const PACK_DISCOUNTS = {
-    1: 10, // Pack of 1 -> 10%
-    2: 20, // Pack of 2 -> 20%
-  };
+  const UNIT_DISCOUNT_PERCENT = 10;
+  const ops = [];
 
-  /**
-   * Parse "Pack of N" from product title. Returns integer N or null.
-   * Accepts titles like "Pack of 2", "PACK OF 2", "pack of 2 - special", etc.
-   */
-  /** @param {any} title */
   function parsePackSizeFromTitle(title) {
     if (!title || typeof title !== 'string') return null;
     const m = title.match(/pack\s*of\s*(\d+)/i);
-    if (m) return parseInt(m[1], 10);
-    return null;
+    return m ? parseInt(m[1], 10) : null;
   }
-
-  const ops = [];
 
   for (const line of input.cart.lines) {
     try {
-      const cartLineId = line.id;
-      // use a loose-typed variable to avoid strict TS checks from generated types
       /** @type {any} */
       const l = line;
-      // Determine the product title (if available)
-      const productTitle = l.merchandise && l.merchandise.__typename === 'ProductVariant' && l.merchandise.product
-        ? l.merchandise.product.title
-        : null;
+
+      const productTitle =
+        l.merchandise?.__typename === 'ProductVariant'
+          ? l.merchandise.product?.title
+          : null;
 
       const packSize = parsePackSizeFromTitle(productTitle);
-      if (!packSize) continue; // not a pack product
+      if (!packSize) continue;
 
-  const discountPercent = PACK_DISCOUNTS[packSize];
-      if (!discountPercent) continue; // no configured discount for this pack size
+      // Validate quantity matches pack size (optional but recommended)
+      if (l.quantity !== packSize) continue;
 
-      // Get original price: prefer compareAtAmountPerQuantity when present
-  const cost = l.cost || {};
-  const compareAt = cost.compareAtAmountPerQuantity && cost.compareAtAmountPerQuantity.amount;
-  const currentAmount = cost.amountPerQuantity && cost.amountPerQuantity.amount;
-      if (!currentAmount && !compareAt) continue; // can't determine price
+      const compareAt =
+        l.cost?.compareAtAmountPerQuantity?.amount ??
+        l.cost?.amountPerQuantity?.amount;
 
-      const originalPriceStr = compareAt || currentAmount;
-      const originalPrice = Number(originalPriceStr);
+      if (!compareAt) continue;
+
+      const originalPrice = Number(compareAt);
       if (Number.isNaN(originalPrice)) continue;
 
-      const discountedUnit = (originalPrice * (1 - discountPercent / 100));
-      // Ensure two decimal places as a string
-      const discountedUnitStr = discountedUnit.toFixed(2);
+      const discountedUnitPrice =
+        originalPrice * (1 - UNIT_DISCOUNT_PERCENT / 100);
 
-      // Build a lineUpdate operation that fixes the unit price per quantity
       ops.push({
         lineUpdate: {
-          cartLineId,
+          cartLineId: l.id,
           price: {
             adjustment: {
               fixedPricePerUnit: {
-                amount: discountedUnitStr,
+                amount: discountedUnitPrice.toFixed(2),
               },
             },
           },
         },
       });
-    } catch (err) {
-      // On unexpected errors for a line, skip it (don't fail entire run)
+    } catch {
       continue;
     }
   }
 
-  if (ops.length === 0) return NO_CHANGES;
-
-  return { operations: ops };
-};
+  return ops.length ? { operations: ops } : NO_CHANGES;
+}
