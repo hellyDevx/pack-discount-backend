@@ -25,75 +25,46 @@ export function cartTransformRun(input) {
   const UNIT_DISCOUNT_PERCENT = 10;
   const ops = [];
 
-  function parsePackSizeFromTitle(title) {
-    if (!title || typeof title !== 'string') return null;
-    const m = title.match(/pack\s*of\s*(\d+)/i);
-    return m ? parseInt(m[1], 10) : null;
-  }
-
+  // New logic: apply a 10% discount on a single product line when
+  // - the product has the `enable_pack` metafield set (truthy)
+  // - AND the quantity on the line is >= 2
   for (const line of input.cart.lines) {
     try {
       /** @type {any} */
       const l = line;
 
-      console.log('-----------------------------');
-      console.log('[Line] ID:', l.id);
-      console.log('[Line] Quantity:', l.quantity);
+      const quantity = Number(l.quantity || 0);
+      if (quantity < 2) continue; 
 
-      const productTitle =
-        l.merchandise?.__typename === 'ProductVariant'
-          ? l.merchandise.product?.title
-          : null;
+      // Only consider ProductVariant merchandise
+      if (l.merchandise?.__typename !== 'ProductVariant') continue;
 
-      console.log('[Line] Product title:', productTitle);
+      const product = l.merchandise.product;
+      if (!product) continue;
 
-      const packSize = parsePackSizeFromTitle(productTitle);
-      console.log('[Line] Parsed pack size:', packSize);
-
-      if (!packSize) {
-        console.log('[SKIP] Not a pack product');
-        continue;
-      }
-
-      if (l.quantity !== packSize) {
-        console.log(
-          '[SKIP] Quantity does not match pack size',
-          'Qty:',
-          l.quantity,
-          'Pack:',
-          packSize
-        );
-        continue;
-      }
+      // The GraphQL query exposes the metafield as `enablePack { value }`
+      const mf = product.enablePack;
+      const mfValue = mf && mf.value;
+      const enabled =
+        mfValue === true || mfValue === 'true' || mfValue === '1' || mfValue === 1;
+      if (!enabled) continue; // metafield not enabled
 
       const compareAt = l.cost?.compareAtAmountPerQuantity?.amount;
       const current = l.cost?.amountPerQuantity?.amount;
+      const basePriceStr = compareAt ?? current;
+      if (!basePriceStr) continue;
 
-      console.log('[Line] Compare-at price:', compareAt);
-      console.log('[Line] Current price:', current);
+  // Use compareAt (original price) as the basis for discount when available; otherwise fallback to current price
+  const basePriceForDiscountStr = l.cost?.compareAtAmountPerQuantity?.amount ?? l.cost?.amountPerQuantity?.amount;
+  if (!basePriceForDiscountStr) continue;
+  const basePriceForDiscount = Number(basePriceForDiscountStr);
+  if (Number.isNaN(basePriceForDiscount)) continue;
 
-      const basePrice = compareAt ?? current;
-      if (!basePrice) {
-        console.log('[SKIP] No base price available');
-        continue;
-      }
+  const calculatedPercent = Math.min(quantity * 10, 100);
+  if (calculatedPercent <= 0) continue;
 
-      const originalPrice = Number(basePrice);
-      if (Number.isNaN(originalPrice)) {
-        console.log('[SKIP] Price is NaN:', basePrice);
-        continue;
-      }
-
-      const discountedUnitPrice =
-        originalPrice * (1 - UNIT_DISCOUNT_PERCENT / 100);
-
-      console.log(
-        '[APPLY]',
-        'Original:',
-        originalPrice,
-        'Discounted:',
-        discountedUnitPrice.toFixed(2)
-      );
+  const discountedUnit = basePriceForDiscount * (1 - calculatedPercent / 100);
+  const discountedUnitStr = discountedUnit.toFixed(2);
 
       ops.push({
         lineUpdate: {
@@ -101,14 +72,14 @@ export function cartTransformRun(input) {
           price: {
             adjustment: {
               fixedPricePerUnit: {
-                amount: discountedUnitPrice.toFixed(2),
+                amount: discountedUnitStr,
               },
             },
           },
         },
       });
     } catch (e) {
-      console.log('[ERROR] Line failed:', e);
+      // skip line on error
       continue;
     }
   }

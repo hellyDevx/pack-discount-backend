@@ -17,6 +17,9 @@ query CartTransformRunInput {
         ... on ProductVariant {
           product {
             title
+            enablePack: metafield(namespace: "custom", key: "enable_pack") {
+              value
+            }
           }
         }
       }
